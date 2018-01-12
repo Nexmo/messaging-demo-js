@@ -4,6 +4,7 @@
 <head>
   <style>
     #login,
+    #user,
     #messages {
       width: 80% height: 300px
     }
@@ -22,13 +23,42 @@
 <body>
 
   <form id="login">
+    <h1>Users</h1>
+    <div id="usersList"></div>
     <h1>Login</h1>
     <input type="text" name="username" value="">
     <input type="submit" value="Login" />
   </form>
+  <form id="user">
+    <h1>Create User</h1>
+    <input type="text" name="username" value="">
+    <input type="submit" value="Create User" />
+  </form>
 
   <section id="messages">
     <button id="leave">Leave Conversation</button>
+    <div>
+      <audio id="audio">
+        <source>
+      </audio>
+      <button id="enable">Enable Audio</button>
+      <button id="disable">Disable Audio</button>
+    </div>
+    <div>
+      <form id="invite">
+        <input type="text" name="username" value="">
+        <input type="submit" value="Invite User" />
+      </form>
+    </div>
+    <div>
+      <form id="kick">
+        <input type="text" name="username" value="">
+        <input type="submit" value="Kick User" />
+      </form>
+    </div>
+    <h1>Members</h1>
+
+    <div id="membersList"></div>
     <h1>Messages</h1>
 
     <div id="messageFeed"></div>
@@ -39,7 +69,11 @@
   </section>
 
   <section id="conversations">
-    <h1>Conversations</h1>
+    <form id="conversation">
+      <h1>Conversations</h1>
+      <input type="text" name="conversation" value="">
+      <input type="submit" value="Create Conversation" />
+    </form>
   </section>
 
   <script>
@@ -50,9 +84,19 @@
         this.messageFeed = document.getElementById('messageFeed')
         this.sendButton = document.getElementById('send')
         this.loginForm = document.getElementById('login')
+        this.userForm = document.getElementById('user')
+        this.inviteForm = document.getElementById('invite')
+        this.kickForm = document.getElementById('kick')
+        this.conversationForm = document.getElementById('conversation')
         this.conversationList = document.getElementById('conversations')
+        this.userList = document.getElementById('usersList')
+        this.membersList = document.getElementById('membersList')
         this.leaveButton = document.getElementById('leave')
+        this.audio = document.getElementById('audio')
+        this.enableButton = document.getElementById('enable')
+        this.disableButton = document.getElementById('disable')
         this.setupUserEvents()
+        this.getUsers().then(users => this.updateUsersList(users)).catch(this.errorLogger)
       }
 
       errorLogger(error) {
@@ -93,6 +137,10 @@
               switch (events[Object.keys(events)[i - 1]].type) {
                 case 'text':
                   eventsHistory += `${conversation.members[events[Object.keys(events)[i - 1]].from].user.name} @ ${date}: <b>${events[Object.keys(events)[i - 1]].body.text}</b><br>`
+                  break;
+
+                case 'member:media':
+                  eventsHistory += `${conversation.members[events[Object.keys(events)[i - 1]].from].user.name} @ ${date}: <b>${events[Object.keys(events)[i - 1]].body.audio ? "enabled" : "disabled"} audio</b><br>`
                   break;
 
                 case 'member:joined':
@@ -137,13 +185,42 @@
 
         conversation.on("member:joined", this.memberEventHandler('joined'))
         conversation.on("member:left", this.memberEventHandler('left'))
+        conversation.on("member:media", (member, event) => {
+          console.log(`*** Member changed media state`, member, event)
+          const text = `${member.user.name} <b>${event.body.audio ? 'enabled' : 'disabled'} audio in the conversation</b><br>`
+          this.messageFeed.innerHTML = text + this.messageFeed.innerHTML
+        })
 
         this.showConversationHistory(conversation)
+        this.updateMembersList(conversation.members)
 
         conversation.on("text:seen", (data, text) => console.log(`${data.name} saw text: ${text.body.text}`))
         conversation.on("text:typing:off", data => console.log(`${data.name} stopped typing...`))
         conversation.on("text:typing:on", data => console.log(`${data.name} started typing...`))
       }
+
+      updateMembersList(members) {
+        let membersElement = document.createElement("ul")
+        for (let id in members) {
+          let memberElement = document.createElement("li")
+          memberElement.textContent = members[id].user.name
+          membersElement.appendChild(memberElement)
+        }
+
+        this.membersList.appendChild(membersElement)
+      }
+
+      updateUsersList(users) {
+        let usersElement = document.createElement("ul")
+        for (let id in users) {
+          let userElement = document.createElement("li")
+          userElement.textContent = users[id].name
+          usersElement.appendChild(userElement)
+        }
+
+        this.userList.appendChild(usersElement)
+      }
+
 
       updateConversationsList(conversations) {
         let conversationsElement = document.createElement("ul")
@@ -161,16 +238,23 @@
         this.conversationList.appendChild(conversationsElement)
         this.conversationList.style.display = 'block'
         this.loginForm.style.display = 'none'
+        this.userForm.style.display = 'none'
       }
 
 
       listConversations(userToken) {
 
         new ConversationClient({
-            debug: false
+            debug: false,
+            iceServers: {
+              urls: 'turn:138.68.169.35:3478?transport=tcp',
+              credential: 'bar',
+              username: 'foo2'
+            }
           })
           .login(userToken)
           .then(app => {
+            this.app = app
             console.log('*** Logged into app', app)
 
             app.on("member:invited", (member, event) => {
@@ -211,6 +295,61 @@
         });
       }
 
+      getUsers() {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("GET", GATEWAY_URL + "/users");
+          xhr.onload = () => resolve(JSON.parse(xhr.responseText));
+          xhr.onerror = () => reject(xhr.statusText);
+          xhr.send();
+        });
+      }
+
+      createConversation(conversation) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const params = "displayName=" + conversation;
+
+          xhr.open("POST", GATEWAY_URL + "/conversations", true);
+          xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+          xhr.setRequestHeader("Content-length", params.length);
+
+          xhr.onload = () => resolve(JSON.parse(xhr.responseText));
+          xhr.onerror = () => reject(xhr.statusText);
+          xhr.send(params)
+        });
+      }
+
+      updateUserStatus(conversationId, userId, action) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const params = "conversationId=" + conversationId + "&userId=" + userId + "&action=" + action;
+
+          xhr.open("PUT", GATEWAY_URL + "/conversations", true);
+          xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+          xhr.setRequestHeader("Content-length", params.length);
+
+          xhr.onload = () => resolve(JSON.parse(xhr.responseText));
+          xhr.onerror = () => reject(xhr.statusText);
+          xhr.send(params)
+        });
+      }
+
+      createUser(user) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const params = "username=" + user + "&admin=true";
+
+          xhr.open("POST", GATEWAY_URL + "/users", true);
+          xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+          xhr.setRequestHeader("Content-length", params.length);
+
+          xhr.onload = () => resolve(JSON.parse(xhr.responseText));
+          xhr.onerror = () => reject(xhr.statusText);
+          xhr.send(params)
+        });
+      }
+
       setupUserEvents() {
         this.sendButton.addEventListener('click', () => {
           this.conversation.sendText(this.messageTextarea.value).then(() => {
@@ -236,6 +375,54 @@
 
         })
 
+        this.userForm.addEventListener('submit', (event) => {
+          event.preventDefault()
+          this.createUser(this.userForm.children.username.value).then(response => {
+            this.listConversations(response.user_jwt);
+          }).catch(this.errorLogger);
+        })
+
+        this.inviteForm.addEventListener('submit', (event) => {
+          event.preventDefault()
+
+          this.getUsers().then(users => {
+            console.log(users);
+            this.updateUserStatus(this.conversation.id, users.filter(user => user.name === this.inviteForm.children.username.value)[0].id, "invite").then(response => {
+              console.log(response);
+            }).catch(this.errorLogger);
+          }).catch(this.errorLogger);
+        })
+
+        this.kickForm.addEventListener('submit', (event) => {
+          event.preventDefault()
+
+          for (var i = Object.keys(this.conversation.members).length; i > 0; i--) {
+            if (this.conversation.members[Object.keys(this.conversation.members)[i - 1]].user.name === this.kickForm.children.username.value) {
+              this.conversation.members[Object.keys(this.conversation.members)[i - 1]].kick()
+            }
+          }
+
+        })
+
+        this.conversationForm.addEventListener('submit', (event) => {
+          event.preventDefault()
+
+          this.createConversation(this.conversationForm.children.conversation.value).then((conversation) => {
+            this.app.getConversation(conversation.id)
+              .then((conversation) => {
+                this.conversation = conversation
+                conversation.join().then(() => {
+                  var conversationDictionary = {}
+                  conversationDictionary[this.conversation.id] = this.conversation
+                  this.updateConversationsList(conversationDictionary)
+                }).catch(this.errorLogger)
+
+              })
+              .catch(this.errorLogger)
+          }).catch(this.errorLogger)
+
+        })
+
         this.messageTextarea.addEventListener('focus', () => {
           this.conversation.startTyping().then(this.eventLogger('text:typing:on')).catch(this.errorLogger)
         });
@@ -245,6 +432,29 @@
 
         this.leaveButton.addEventListener('click', () => {
           this.conversation.leave().then(this.eventLogger('member:left')).catch(this.errorLogger)
+        })
+
+        this.enableButton.addEventListener('click', () => {
+
+          this.conversation.media.enable().then(stream => {
+            // Older browsers may not have srcObject
+            if ("srcObject" in this.audio) {
+              this.audio.srcObject = stream;
+            } else {
+              // Avoid using this in new browsers, as it is going away.
+              this.audio.src = window.URL.createObjectURL(stream);
+            }
+
+            this.audio.onloadedmetadata = () => {
+              this.audio.play();
+            }
+
+            this.eventLogger('member:media')()
+          }).catch(this.errorLogger)
+        })
+
+        this.disableButton.addEventListener('click', () => {
+          this.conversation.media.disable().then(this.eventLogger('member:media')).catch(this.errorLogger)
         })
       }
     }

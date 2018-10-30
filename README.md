@@ -2,7 +2,7 @@
 
 In order to run this you have to:
 
-1. Go to https://github.com/Nexmo/messaging-gateway and follow the instructions there to get it running on your local machine
+1. Go to https://github.com/Nexmo/messaging-gateway and follow the instructions there to get it running on your local machine.
 
 2. `npm install`
 
